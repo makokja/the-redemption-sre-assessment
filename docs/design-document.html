@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>The Redemption - Design Document</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 100%;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+            margin-top: 40px;
+            page-break-after: avoid;
+        }
+        
+        h2 {
+            color: #34495e;
+            border-bottom: 2px solid #95a5a6;
+            padding-bottom: 8px;
+            margin-top: 30px;
+            page-break-after: avoid;
+        }
+        
+        h3 {
+            color: #555;
+            margin-top: 25px;
+            page-break-after: avoid;
+        }
+        
+        h4 {
+            color: #666;
+            margin-top: 20px;
+            page-break-after: avoid;
+        }
+        
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.85em;
+            color: #e74c3c;
+        }
+        
+        pre {
+            background-color: #f8f8f8;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            border-left: 4px solid #3498db;
+            page-break-inside: avoid;
+        }
+        
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            color: #333;
+        }
+        
+        ul, ol {
+            margin-left: 20px;
+            margin-bottom: 15px;
+        }
+        
+        li {
+            margin: 8px 0;
+        }
+        
+        p {
+            margin: 10px 0;
+        }
+        
+        strong {
+            color: #2c3e50;
+            font-weight: 600;
+        }
+        
+        em {
+            color: #555;
+        }
+        
+        a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        @media print {
+            body {
+                padding: 0;
+            }
+            
+            h1, h2, h3, h4 {
+                page-break-after: avoid;
+            }
+            
+            pre, ul, ol {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+<h1>The Redemption - Design Document</h1>
+<h2>Executive Summary</h2>
+
+<h3>Project Overview</h3>
+<p>This document outlines the architectural design and implementation strategy for "The Redemption," a business-critical microservice handling global hotel point deductions on AWS EKS. The solution addresses the core requirements of zero downtime, automatic 10x traffic scaling, and comprehensive security while maintaining operational excellence.</p>
+
+<h3>Key Achievements</h3>
+<ul>
+<li><strong>Zero Downtime</strong>: Multi-AZ architecture with automatic failover</li>
+<li><strong>10x Auto-Scaling</strong>: Handles flash sales with aggressive horizontal scaling</li>
+<li><strong>Security</strong>: Defense-in-depth with 5 security layers</li>
+<li><strong>Observability</strong>: Real-time monitoring with automated alerting</li>
+<li><strong>Cost-Effective</strong>: Spot instances and auto-scaling reduce costs by ~30%</li>
+</ul>
+
+<p>---</p>
+
+<h2>1. Architecture Design</h2>
+
+<h3>1.1 Compute & Infrastructure</h3>
+
+<h4>EKS Cluster Configuration</h4>
+<ul>
+<li><strong>Kubernetes Version</strong>: 1.28 </li>
+<li><strong>Control Plane</strong>: Managed by AWS across 3 AZs</li>
+<li><strong>Node Groups</strong>:</li>
+</ul>
+<p>  - <strong>General Purpose</strong>: 3x t3.large (on-demand) for system workloads</p>
+<p>  - <strong>High Performance</strong>: 2-20x c5.2xlarge (spot) for application workloads</p>
+<ul>
+<li><strong>Networking</strong>: VPC with public/private subnets across 3 AZs</li>
+</ul>
+
+<h4>High Availability Design</h4>
+<ul>
+<li><strong>Multi-AZ Deployment</strong>: Resources distributed across us-east-1a, 1b, 1c</li>
+<li><strong>Pod Anti-Affinity</strong>: Ensures pods spread across nodes and zones</li>
+<li><strong>Pod Disruption Budget</strong>: Minimum 2 pods always available</li>
+<li><strong>Rolling Updates</strong>: maxUnavailable=0 for zero downtime deployments</li>
+</ul>
+
+<h4>Rationale</h4>
+<ul>
+<li><strong>EKS over self-managed</strong>: Reduces operational overhead, AWS manages control plane</li>
+<li><strong>Multi-AZ</strong>: Survives entire availability zone failures</li>
+<li><strong>Spot instances</strong>: 70% cost savings for burst capacity with minimal risk</li>
+<li><strong>Node diversity</strong>: Separates system workloads from application workloads</li>
+</ul>
+
+<h3>1.2 Scalability Strategy</h3>
+
+<h4>Horizontal Pod Autoscaler (HPA)</h4>
+<p>``<code>yaml</p>
+<p>Min Replicas: 3</p>
+<p>Max Replicas: 50</p>
+<p>Target CPU: 70%</p>
+<p>Target Memory: 80%</p>
+
+<p>Scale-Up Policy:</p>
+<p>  - 100% increase every 15 seconds (aggressive)</p>
+<p>  - OR add 10 pods every 15 seconds</p>
+<p>  - Whichever is greater</p>
+
+<p>Scale-Down Policy:</p>
+<p>  - 10% decrease every 60 seconds (conservative)</p>
+<p>  - 5-minute stabilization window</p>
+</code>`<code>
+
+<h4>Karpenter (Node Autoscaling)</h4>
+<ul>
+<li><strong>Just-in-time Provisioning</strong>: Launches nodes in <30 seconds</li>
+<li><strong>Bin-packing</strong>: Optimizes node utilization and cost</li>
+<li><strong>Spot Instance Support</strong>: 70% spot, 30% on-demand mix</li>
+<li><strong>Scale-down</strong>: Consolidates underutilized nodes after 30 seconds</li>
+<li><strong>Disruption Budgets</strong>: Ensures availability during scaling</li>
+</ul>
+
+<h4>Load Balancer Configuration</h4>
+<ul>
+<li><strong>Type</strong>: Application Load Balancer (Layer 7)</li>
+<li><strong>Cross-Zone</strong>: Enabled for even distribution</li>
+<li><strong>Connection Draining</strong>: 30 seconds for graceful shutdown</li>
+<li><strong>Stickiness</strong>: Session-based for consistent user experience</li>
+</ul>
+
+<h4>Flash Sale Scenario (10x Traffic)</h4>
+<strong>Baseline</strong>: 1,000 requests/second, 3 pods
+<strong>Flash Sale</strong>: 10,000 requests/second
+
+<strong>Timeline</strong>:
+<ul>
+<li><strong>T+0s</strong>: Traffic spike begins</li>
+<li><strong>T+15s</strong>: HPA detects high CPU, scales to 6 pods (100% increase)</li>
+<li><strong>T+30s</strong>: HPA continues scaling, reaches 12 pods</li>
+<li><strong>T+45s</strong>: Karpenter provisions 3 new nodes in <30s</li>
+<li><strong>T+90s</strong>: System stabilizes at 30 pods across 8 nodes</li>
+<li><strong>Result</strong>: 10x capacity, <2 minute scale-up time</li>
+</ul>
+
+<h3>1.3 Data Layer</h3>
+
+<h4>RDS PostgreSQL</h4>
+<ul>
+<li><strong>Instance</strong>: db.r6g.xlarge (memory-optimized)</li>
+<li><strong>Multi-AZ</strong>: Automatic failover to standby</li>
+<li><strong>Storage</strong>: 100GB with auto-scaling to 1TB</li>
+<li><strong>Backups</strong>: 7-day retention, automated snapshots</li>
+<li><strong>Encryption</strong>: At-rest with KMS, in-transit with TLS</li>
+</ul>
+
+<h4>ElastiCache Redis</h4>
+<ul>
+<li><strong>Instance</strong>: cache.r6g.large x3 (one per AZ)</li>
+<li><strong>Replication</strong>: Multi-AZ with automatic failover</li>
+<li><strong>Use Cases</strong>: Session storage, rate limiting, caching</li>
+<li><strong>Encryption</strong>: At-rest and in-transit</li>
+<li><strong>Auth</strong>: Token-based authentication</li>
+</ul>
+
+<p>---</p>
+
+<h2>2. Security Architecture</h2>
+
+<h3>2.1 Defense in Depth (5 Layers)</h3>
+
+<h4>Layer 1: Perimeter Security</h4>
+<ul>
+<li><strong>AWS WAF</strong>: </li>
+</ul>
+<p>  - Rate limiting (2,000 requests/IP/5min)</p>
+<p>  - OWASP Top 10 protection</p>
+<p>  - SQL injection prevention</p>
+<p>  - Known bad inputs blocking</p>
+<ul>
+<li><strong>DDoS Protection</strong>: AWS Shield Standard (included)</li>
+</ul>
+
+<h4>Layer 2: Network Security</h4>
+<ul>
+<li><strong>VPC Segmentation</strong>: Public subnets for ALB, private for workloads</li>
+<li><strong>Security Groups</strong>: </li>
+</ul>
+<p>  - ALB: Allow 80/443 from internet</p>
+<p>  - Nodes: Allow traffic from ALB and within cluster</p>
+<p>  - RDS: Allow 5432 only from nodes</p>
+<p>  - Redis: Allow 6379 only from nodes</p>
+<ul>
+<li><strong>Network Policies</strong>: Kubernetes-level pod-to-pod restrictions</li>
+<li><strong>VPC Flow Logs</strong>: Network traffic monitoring</li>
+</ul>
+
+<h4>Layer 3: Application Security</h4>
+<ul>
+<li><strong>Pod Security Context</strong>:</li>
+</ul>
+<p>  - Run as non-root user (UID 1000)</p>
+<p>  - Read-only root filesystem</p>
+<p>  - Drop all capabilities</p>
+<p>  - No privilege escalation</p>
+<ul>
+<li><strong>RBAC</strong>: Least privilege for service accounts</li>
+<li><strong>Network Policies</strong>: Restrict ingress/egress per namespace</li>
+</ul>
+
+<h4>Layer 4: Data Security</h4>
+<ul>
+<li><strong>Encryption at Rest</strong>: </li>
+</ul>
+<p>  - EBS volumes: KMS encryption</p>
+<p>  - RDS: KMS encryption</p>
+<p>  - Redis: Native encryption</p>
+<p>  - Secrets: AWS Secrets Manager</p>
+<ul>
+<li><strong>Encryption in Transit</strong>:</li>
+</ul>
+<p>  - ALB to pods: TLS 1.2+</p>
+<p>  - Pods to RDS: TLS</p>
+<p>  - Pods to Redis: TLS</p>
+
+<h4>Layer 5: Identity & Access</h4>
+<ul>
+<li><strong>IAM Roles for Service Accounts (IRSA)</strong>: Pod-level AWS permissions without static credentials</li>
+<li><strong>AWS Secrets Manager Integration</strong>:</li>
+</ul>
+<p>  - Centralized secret storage with encryption at rest (KMS)</p>
+<p>  - External Secrets Operator syncs secrets to Kubernetes</p>
+<p>  - Automatic secret rotation support</p>
+<p>  - No hardcoded credentials in code or manifests</p>
+<p>  - Secrets refreshed every 1 hour automatically</p>
+<ul>
+<li><strong>Audit Logging</strong>: CloudWatch Logs for all API calls and secret access</li>
+</ul>
+
+<h3>2.2 Compliance & Best Practices</h3>
+<ul>
+<li><strong>Least Privilege</strong>: All IAM roles follow minimum required permissions</li>
+<li><strong>Secrets Rotation</strong>: Automated rotation for database credentials</li>
+<li><strong>Patch Management</strong>: Automated node AMI updates</li>
+<li><strong>Vulnerability Scanning</strong>: Container image scanning (recommended)</li>
+</ul>
+
+<p>---</p>
+
+<h2>3. Reliability & Observability</h2>
+
+<h3>3.1 Health Checks</h3>
+
+<h4>Application Health</h4>
+<ul>
+<li><strong>Liveness Probe</strong>: </code>/health<code> endpoint every 10s</li>
+</ul>
+<p>  - Failure threshold: 3 consecutive failures</p>
+<p>  - Action: Restart pod</p>
+<ul>
+<li><strong>Readiness Probe</strong>: </code>/ready<code> endpoint every 5s</li>
+</ul>
+<p>  - Failure threshold: 3 consecutive failures</p>
+<p>  - Action: Remove from service rotation</p>
+
+<h4>Infrastructure Health</h4>
+<ul>
+<li><strong>ALB Health Checks</strong>: </code>/health` every 15s</li>
+</ul>
+<p>  - Healthy threshold: 2 consecutive successes</p>
+<p>  - Unhealthy threshold: 2 consecutive failures</p>
+<ul>
+<li><strong>Node Health</strong>: Kubelet heartbeat every 10s</li>
+</ul>
+
+<h3>3.2 Monitoring Stack</h3>
+
+<h4>CloudWatch Container Insights</h4>
+<ul>
+<li><strong>Metrics Collected</strong>:</li>
+</ul>
+<p>  - Node CPU, memory, disk, network</p>
+<p>  - Pod CPU, memory, network</p>
+<p>  - Container restart count</p>
+<p>  - Cluster-level aggregations</p>
+<ul>
+<li><strong>Retention</strong>: 7 days</li>
+<li><strong>Dashboards</strong>: Pre-built visualizations</li>
+</ul>
+
+<h4>Prometheus</h4>
+<ul>
+<li><strong>Scrape Interval</strong>: 15 seconds</li>
+<li><strong>Metrics</strong>:</li>
+</ul>
+<p>  - Application-specific metrics (request rate, latency, errors)</p>
+<p>  - Custom business metrics (points redeemed, transaction volume)</p>
+<p>  - Kubernetes metrics (pod status, resource usage)</p>
+<ul>
+<li><strong>Storage</strong>: 15-day retention</li>
+</ul>
+
+<h4>CloudWatch Alarms</h4>
+<ol>
+<li><strong>High CPU Utilization</strong>: >80% for 10 minutes</li>
+<li><strong>High Memory Utilization</strong>: >80% for 10 minutes</li>
+<li><strong>Pod Failures</strong>: >5 restarts in 5 minutes</li>
+<li><strong>High Response Time</strong>: >1 second average</li>
+<li><strong>5XX Errors</strong>: >10 per minute</li>
+</ol>
+
+<h3>3.3 Logging Strategy</h3>
+<ul>
+<li><strong>Application Logs</strong>: stdout/stderr → CloudWatch Logs</li>
+<li><strong>Audit Logs</strong>: EKS control plane logs</li>
+<li><strong>Network Logs</strong>: VPC Flow Logs</li>
+<li><strong>Retention</strong>: 7 days (cost optimization)</li>
+<li><strong>Aggregation</strong>: Centralized in CloudWatch Log Groups</li>
+</ul>
+
+<h3>3.4 Disaster Recovery</h3>
+
+<h4>RTO/RPO Targets</h4>
+<ul>
+<li><strong>RTO (Recovery Time Objective)</strong>: 5 minutes</li>
+<li><strong>RPO (Recovery Point Objective)</strong>: 5 minutes</li>
+</ul>
+
+<h4>Backup Strategy</h4>
+<ul>
+<li><strong>RDS</strong>: Automated daily snapshots, 7-day retention</li>
+<li><strong>Redis</strong>: Automated snapshots, 5-day retention</li>
+<li><strong>Kubernetes State</strong>: Velero backups (recommended)</li>
+<li><strong>Infrastructure</strong>: Terraform state in S3 with versioning</li>
+</ul>
+
+<h4>Failure Scenarios</h4>
+<ol>
+<li><strong>AZ Failure</strong>: Automatic failover, <30s impact</li>
+<li><strong>Node Failure</strong>: Pod rescheduling, <60s impact</li>
+<li><strong>Database Failover</strong>: RDS automatic, 60-120s impact</li>
+<li><strong>Bad Deployment</strong>: Rollback via Helm, <5min impact</li>
+</ol>
+
+<p>---</p>
+
+<h2>4. Operational Excellence</h2>
+
+<h3>4.1 Day 2 Operations</h3>
+
+<h4>Deployment Strategy</h4>
+<ul>
+<li><strong>GitOps</strong>: ArgoCD or FluxCD for continuous deployment</li>
+<li><strong>Helm</strong>: Application lifecycle management</li>
+<li><strong>Terraform</strong>: Infrastructure changes</li>
+<li><strong>Blue-Green</strong>: For major updates (future enhancement)</li>
+</ul>
+
+<h4>Monitoring & Alerting</h4>
+<ul>
+<li><strong>24/7 Monitoring</strong>: CloudWatch + Prometheus</li>
+<li><strong>Alert Routing</strong>: SNS → Email/Slack/PagerDuty</li>
+<li><strong>On-Call Rotation</strong>: SRE team coverage</li>
+<li><strong>Runbooks</strong>: Documented procedures for common issues</li>
+</ul>
+
+<h4>Capacity Planning</h4>
+<ul>
+<li><strong>Weekly Reviews</strong>: Analyze usage trends</li>
+<li><strong>Quarterly Planning</strong>: Adjust reserved capacity</li>
+<li><strong>Cost Optimization</strong>: Review spot instance usage</li>
+<li><strong>Performance Testing</strong>: Monthly load tests</li>
+</ul>
+
+<h4>Maintenance Windows</h4>
+<ul>
+<li><strong>Kubernetes Upgrades</strong>: Quarterly (non-disruptive)</li>
+<li><strong>Node AMI Updates</strong>: Monthly (rolling)</li>
+<li><strong>Database Maintenance</strong>: Weekly (automated)</li>
+<li><strong>Security Patches</strong>: As needed (emergency)</li>
+</ul>
+
+<h3>4.2 Cost Optimization</h3>
+
+<h4>Current Costs (Estimated)</h4>
+<ul>
+<li><strong>Compute</strong>: $400/month (baseline)</li>
+<li><strong>Database</strong>: $500/month</li>
+<li><strong>Cache</strong>: $400/month</li>
+<li><strong>Networking</strong>: $125/month</li>
+<li><strong>Monitoring</strong>: $50/month</li>
+<li><strong>Total</strong>: ~$1,475/month baseline</li>
+</ul>
+
+<h4>Optimization Strategies</h4>
+<ol>
+<li><strong>Spot Instances</strong>: 70% savings on burst capacity</li>
+<li><strong>Auto-Scaling</strong>: Scale down during off-peak (30% savings)</li>
+<li><strong>Reserved Instances</strong>: 40% savings on baseline (future)</li>
+<li><strong>S3 Lifecycle</strong>: Archive logs to Glacier (50% savings)</li>
+<li><strong>Right-Sizing</strong>: Adjust based on actual usage</li>
+</ol>
+
+<h4>Cost During Flash Sale</h4>
+<ul>
+<li><strong>Peak</strong>: ~$2,500/month (if sustained)</li>
+<li><strong>Actual</strong>: ~$1,600/month (short bursts)</li>
+<li><strong>Savings</strong>: Auto-scaling prevents over-provisioning</li>
+</ul>
+
+<p>---</p>
+
+<h2>5. Team Delegation & Timeline</h2>
+
+<h3>5.1 Team Structure</h3>
+
+<h4>Senior Engineer (Lead) - 3-4 days</h4>
+<strong>Core Responsibilities</strong>:
+<ul>
+<li>Overall architecture design and review</li>
+<li>Complex module implementation (EKS, Security)</li>
+<li>Production deployment and validation</li>
+<li>Code review and mentorship</li>
+</ul>
+
+<strong>Specific Tasks</strong>:
+<ol>
+<li>Design multi-AZ EKS architecture</li>
+<li>Implement EKS Terraform module with IRSA</li>
+<li>Configure security layers (WAF, KMS, Security Groups)</li>
+<li>Set up monitoring and alerting stack</li>
+<li>Review all PRs from junior engineers</li>
+<li>Perform production deployment</li>
+<li>Validate auto-scaling behavior</li>
+<li>Create incident response procedures</li>
+</ol>
+
+<strong>Deliverables</strong>:
+<ul>
+<li>EKS cluster fully operational</li>
+<li>Security hardening complete</li>
+<li>Monitoring dashboards configured</li>
+<li>Production deployment successful</li>
+</ul>
+
+<h4>Junior Engineer 1 - 2-3 days</h4>
+<strong>Core Responsibilities</strong>:
+<ul>
+<li>Networking infrastructure</li>
+<li>Data layer setup</li>
+<li>Documentation</li>
+</ul>
+
+<strong>Specific Tasks</strong>:
+<ol>
+<li>Implement VPC Terraform module</li>
+</ol>
+<p>   - Multi-AZ subnets</p>
+<p>   - NAT Gateways</p>
+<p>   - Route tables</p>
+<p>   - VPC Flow Logs</p>
+<ol>
+<li>Configure RDS PostgreSQL</li>
+</ol>
+<p>   - Multi-AZ deployment</p>
+<p>   - Parameter groups</p>
+<p>   - Security groups</p>
+<p>   - Backup configuration</p>
+<ol>
+<li>Set up ElastiCache Redis</li>
+</ol>
+<p>   - Replication group</p>
+<p>   - Auth token</p>
+<p>   - Security groups</p>
+<ol>
+<li>Write deployment documentation</li>
+<li>Create operational runbooks</li>
+</ol>
+
+<strong>Deliverables</strong>:
+<ul>
+<li>VPC with multi-AZ networking</li>
+<li>RDS and Redis fully configured</li>
+<li>Comprehensive documentation</li>
+</ul>
+
+<h4>Junior Engineer 2 - 2-3 days</h4>
+<strong>Core Responsibilities</strong>:
+<ul>
+<li>Kubernetes application deployment</li>
+<li>Helm chart development</li>
+<li>Testing and validation</li>
+</ul>
+
+<strong>Specific Tasks</strong>:
+<ol>
+<li>Create Helm chart for redemption service</li>
+</ol>
+<p>   - Deployment with anti-affinity</p>
+<p>   - Service and Ingress</p>
+<p>   - ConfigMaps and Secrets</p>
+<ol>
+<li>Configure HPA with aggressive scale-up</li>
+<li>Set up Pod Disruption Budget</li>
+<li>Deploy Prometheus monitoring</li>
+<li>Perform load testing</li>
+</ol>
+<p>   - Baseline performance</p>
+<p>   - Flash sale simulation</p>
+<p>   - Scale-down behavior</p>
+<ol>
+<li>Document scaling behavior and metrics</li>
+</ol>
+
+<strong>Deliverables</strong>:
+<ul>
+<li>Production-ready Helm chart</li>
+<li>HPA configured and tested</li>
+<li>Load test results documented</li>
+</ul>
+
+<h3>5.2 Project Timeline</h3>
+
+<h4>Week 1: Infrastructure Setup</h4>
+<ul>
+<li><strong>Day 1-2</strong>: VPC, networking, data layer (Junior 1)</li>
+<li><strong>Day 1-3</strong>: EKS cluster, security (Senior)</li>
+<li><strong>Day 1-2</strong>: Helm chart development (Junior 2)</li>
+</ul>
+
+<h4>Week 2: Integration & Testing</h4>
+<ul>
+<li><strong>Day 3</strong>: Monitoring setup (Senior)</li>
+<li><strong>Day 3</strong>: Application deployment (Junior 2)</li>
+<li><strong>Day 3</strong>: Documentation (Junior 1)</li>
+<li><strong>Day 4</strong>: Integration testing (All)</li>
+<li><strong>Day 4</strong>: Load testing (Junior 2 + Senior)</li>
+</ul>
+
+<h4>Week 2: Production Deployment</h4>
+<ul>
+<li><strong>Day 5</strong>: Production deployment (Senior)</li>
+<li><strong>Day 5</strong>: Validation and handoff (All)</li>
+</ul>
+
+<h3>5.3 Knowledge Transfer</h3>
+<ul>
+<li><strong>Daily Standups</strong>: 15-minute sync</li>
+<li><strong>Code Reviews</strong>: All PRs reviewed by Senior</li>
+<li><strong>Pair Programming</strong>: Junior engineers pair on complex tasks</li>
+<li><strong>Documentation</strong>: Each engineer documents their work</li>
+<li><strong>Handoff Session</strong>: Final walkthrough of entire system</li>
+</ul>
+
+<p>---</p>
+
+<h2>6. Trade-offs & Design Decisions</h2>
+
+<h3>6.1 Key Trade-offs</h3>
+
+<h4>EKS vs. Self-Managed Kubernetes</h4>
+<strong>Decision</strong>: EKS
+<strong>Rationale</strong>: 
+<ul>
+<li>Reduced operational overhead</li>
+<li>AWS manages control plane upgrades</li>
+<li>Better integration with AWS services</li>
+</ul>
+<strong>Trade-off</strong>: Higher cost (~$73/month), less control
+
+<h4>Spot vs. On-Demand Instances</h4>
+<strong>Decision</strong>: Hybrid (on-demand baseline + spot burst)
+<strong>Rationale</strong>:
+<ul>
+<li>70% cost savings on burst capacity</li>
+<li>Acceptable interruption risk for stateless workloads</li>
+</ul>
+<strong>Trade-off</strong>: Potential interruptions during extreme demand
+
+<h4>Multi-AZ NAT Gateways</h4>
+<strong>Decision</strong>: One NAT Gateway per AZ
+<strong>Rationale</strong>:
+<ul>
+<li>Survives AZ failures</li>
+<li>No single point of failure</li>
+</ul>
+<strong>Trade-off</strong>: 3x cost (~$100/month vs ~$33/month)
+
+<h4>Aggressive HPA Scale-Up</h4>
+<strong>Decision</strong>: 100% increase every 15 seconds
+<strong>Rationale</strong>:
+<ul>
+<li>Flash sales require immediate capacity</li>
+<li>Business-critical, revenue-impacting</li>
+</ul>
+<strong>Trade-off</strong>: Potential over-provisioning, higher costs
+
+<h3>6.2 Future Enhancements</h3>
+
+<ol>
+<li><strong>Service Mesh (Istio)</strong>:</li>
+</ol>
+<p>   - Advanced traffic management</p>
+<p>   - Circuit breaking</p>
+<p>   - Mutual TLS between services</p>
+
+<ol>
+<li><strong>GitOps (ArgoCD)</strong>:</li>
+</ol>
+<p>   - Automated deployments</p>
+<p>   - Declarative configuration</p>
+<p>   - Audit trail</p>
+
+<ol>
+<li><strong>Chaos Engineering</strong>:</li>
+</ol>
+<p>   - Proactive failure testing</p>
+<p>   - Resilience validation</p>
+<p>   - Confidence in recovery procedures</p>
+
+<ol>
+<li><strong>Multi-Region</strong>:</li>
+</ol>
+<p>   - Global load balancing</p>
+<p>   - Disaster recovery</p>
+<p>   - Reduced latency</p>
+
+<ol>
+<li><strong>Cost Optimization</strong>:</li>
+</ol>
+<p>   - Reserved Instances for baseline</p>
+<p>   - Savings Plans for compute</p>
+<p>   - Fargate for specific workloads</p>
+
+<p>---</p>
+
+<h2>7. Success Metrics</h2>
+
+<h3>7.1 Availability Metrics</h3>
+<ul>
+<li><strong>Target</strong>: 99.95% uptime (21.6 minutes downtime/month)</li>
+<li><strong>Measurement</strong>: ALB target health checks</li>
+<li><strong>Current</strong>: 99.99% (estimated)</li>
+</ul>
+
+<h3>7.2 Performance Metrics</h3>
+<ul>
+<li><strong>Response Time</strong>: p95 < 200ms, p99 < 500ms</li>
+<li><strong>Throughput</strong>: 10,000 requests/second during flash sales</li>
+<li><strong>Error Rate</strong>: < 0.1%</li>
+</ul>
+
+<h3>7.3 Scalability Metrics</h3>
+<ul>
+<li><strong>Scale-Up Time</strong>: < 2 minutes for 10x traffic</li>
+<li><strong>Scale-Down Time</strong>: < 30 minutes to baseline</li>
+<li><strong>Resource Utilization</strong>: 60-80% during normal operation</li>
+</ul>
+
+<h3>7.4 Operational Metrics</h3>
+<ul>
+<li><strong>MTTR (Mean Time To Recovery)</strong>: < 5 minutes</li>
+<li><strong>MTTD (Mean Time To Detection)</strong>: < 1 minute</li>
+<li><strong>Deployment Frequency</strong>: Multiple per day (GitOps)</li>
+<li><strong>Change Failure Rate</strong>: < 5%</li>
+</ul>
+
+<p>---</p>
+
+<h2>8. Conclusion</h2>
+
+<p>This architecture provides a production-ready, highly available, and automatically scalable solution for "The Redemption" microservice. The design addresses all assessment requirements:</p>
+
+<p>✅ <strong>Zero Downtime</strong>: Multi-AZ, rolling updates, PDB</p>
+<p>✅ <strong>10x Auto-Scaling</strong>: HPA + Karpenter</p>
+<p>✅ <strong>Security</strong>: 5-layer defense-in-depth</p>
+<p>✅ <strong>Observability</strong>: CloudWatch + Prometheus + Grafana</p>
+<p>✅ <strong>Operational Excellence</strong>: Automated, documented, tested</p>
+
+<p>The solution is cost-effective, maintainable, and ready for production deployment.</p>
+
+<p>---</p>
+
+<h2>Appendix A: Technology Stack</h2>
+
+<ul>
+<li><strong>Container Orchestration</strong>: Kubernetes 1.28 on AWS EKS</li>
+<li><strong>Infrastructure as Code</strong>: Terraform 1.5+</li>
+<li><strong>Application Deployment</strong>: Helm 3.0+</li>
+<li><strong>Secrets Management</strong>: External Secrets Operator + AWS Secrets Manager</li>
+<li><strong>Load Balancing</strong>: AWS Application Load Balancer</li>
+<li><strong>Database</strong>: RDS PostgreSQL 15.4</li>
+<li><strong>Cache</strong>: ElastiCache Redis 7.0</li>
+<li><strong>Monitoring</strong>: CloudWatch, Prometheus, Grafana</li>
+<li><strong>Security</strong>: AWS WAF, KMS, Secrets Manager, IRSA</li>
+<li><strong>Networking</strong>: AWS VPC, Security Groups, Network Policies</li>
+</ul>
+
+
+</body>
+</html>

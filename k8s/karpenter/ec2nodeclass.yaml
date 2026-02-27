@@ -1,0 +1,61 @@
+apiVersion: karpenter.k8s.aws/v1beta1
+kind: EC2NodeClass
+metadata:
+  name: redemption-ec2nodeclass
+spec:
+  # AMI Selection
+  amiFamily: AL2  # Amazon Linux 2
+  
+  # Subnet selection - use private subnets across all AZs
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: redemption-cluster  # Tag your subnets
+        kubernetes.io/role/internal-elb: "1"        # Private subnets
+  
+  # Security group selection
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: redemption-cluster  # Tag your security groups
+  
+  # IAM role for nodes
+  role: KarpenterNodeRole-redemption  # IAM role with required permissions
+  
+  # Instance profile (optional, auto-created from role)
+  # instanceProfile: KarpenterNodeInstanceProfile-redemption
+  
+  # User data for node initialization
+  userData: |
+    #!/bin/bash
+    # Custom bootstrap script
+    /etc/eks/bootstrap.sh redemption-cluster \
+      --kubelet-extra-args '--node-labels=managed-by=karpenter,workload=redemption'
+  
+  # Block device mappings
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        iops: 3000
+        throughput: 125
+        encrypted: true
+        deleteOnTermination: true
+  
+  # Metadata options
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 2
+    httpTokens: required  # IMDSv2 required for security
+  
+  # Tags applied to EC2 instances
+  tags:
+    Name: redemption-karpenter-node
+    Environment: production
+    ManagedBy: karpenter
+    Cluster: redemption-cluster
+    CostCenter: engineering
+    Application: redemption
+    
+  # Detailed monitoring (CloudWatch)
+  detailedMonitoring: true

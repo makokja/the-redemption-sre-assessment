@@ -1,0 +1,65 @@
+# Karpenter Helm values for installation
+# Install with: helm upgrade --install karpenter karpenter/karpenter --namespace karpenter --create-namespace --values karpenter-values.yaml
+
+# Karpenter controller settings
+replicas: 2  # High availability
+
+# Service account for Karpenter controller
+serviceAccount:
+  create: true
+  name: karpenter
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/KarpenterControllerRole-redemption"
+
+# Controller settings
+settings:
+  clusterName: redemption-cluster
+  clusterEndpoint: "https://CLUSTER_ENDPOINT.eks.us-east-1.amazonaws.com"
+  defaultInstanceProfile: "KarpenterNodeInstanceProfile-redemption"
+  interruptionQueue: "redemption-karpenter-interruption"  # SQS queue for spot interruptions
+  
+# Resource limits for controller
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Affinity to run on system nodes (not Karpenter-managed nodes)
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: karpenter.sh/nodepool
+              operator: DoesNotExist
+
+# Tolerations
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+
+# Pod disruption budget
+podDisruptionBudget:
+  name: karpenter
+  maxUnavailable: 1
+
+# Logging
+logLevel: info
+logEncoding: json
+
+# Metrics
+controller:
+  metrics:
+    port: 8080
+
+# Webhook
+webhook:
+  enabled: true
+  port: 8443
+
+# Batch settings for efficiency
+batchMaxDuration: 10s
+batchIdleDuration: 1s

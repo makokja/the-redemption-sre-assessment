@@ -1,0 +1,66 @@
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: redemption-nodepool
+spec:
+  # Template for nodes created by this NodePool
+  template:
+    metadata:
+      labels:
+        workload: redemption
+        managed-by: karpenter
+    spec:
+      # Node requirements - Karpenter will select instances that match
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand", "spot"]  # Mix of On-Demand and Spot
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["t", "m", "c"]  # General purpose, compute optimized
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["4"]  # Only use generation 5 and above (t3, m5, c5, etc)
+        - key: karpenter.k8s.aws/instance-size
+          operator: In
+          values: ["large", "xlarge", "2xlarge"]  # Appropriate sizes
+      
+      # Node class reference
+      nodeClassRef:
+        name: redemption-ec2nodeclass
+      
+      # Taints for dedicated workload (optional)
+      taints:
+        - key: workload
+          value: redemption
+          effect: NoSchedule
+  
+  # Limits for this NodePool
+  limits:
+    cpu: "100"      # Max 100 vCPUs across all nodes in this pool
+    memory: 400Gi   # Max 400Gi memory across all nodes in this pool
+  
+  # Disruption budget - controls how Karpenter can disrupt nodes
+  disruption:
+    # Consolidation - replace nodes with cheaper options
+    consolidationPolicy: WhenUnderutilized
+    consolidateAfter: 30s  # How long to wait before consolidating
+    
+    # Expiration - force node replacement after time period
+    expireAfter: 720h  # 30 days - prevents long-running nodes
+    
+    # Budget - limit disruptions
+    budgets:
+      - nodes: "10%"  # Only disrupt 10% of nodes at a time
+        schedule: "* * * * *"  # Always active
+      - nodes: "0"  # No disruptions during peak hours
+        schedule: "0 9-17 * * MON-FRI"  # 9 AM - 5 PM weekdays
+  
+  # Weight for this NodePool (higher = preferred)
+  weight: 10
