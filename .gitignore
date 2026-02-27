@@ -73,6 +73,6 @@ build/
 *.zip
 *.tar.gz
 
-diagram/
-doc/
+diagrams/
+docs/
 scripts/
