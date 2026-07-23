@@ -16,12 +16,6 @@ spec:
     helm:
       valueFiles:
         - values.yaml
-      # Override values for specific environments
-      parameters:
-        - name: replicaCount
-          value: "3"
-        - name: image.tag
-          value: "latest"
   
   destination:
     server: https://kubernetes.default.svc

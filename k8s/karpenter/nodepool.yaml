@@ -34,6 +34,9 @@ spec:
       # Node class reference
       nodeClassRef:
         name: redemption-ec2nodeclass
+
+      # Replace nodes periodically to pick up fresh AMIs and configuration
+      expireAfter: 720h  # 30 days
       
       # Taints for dedicated workload (optional)
       taints:
@@ -50,17 +53,13 @@ spec:
   disruption:
     # Consolidation - replace nodes with cheaper options
     consolidationPolicy: WhenUnderutilized
-    consolidateAfter: 30s  # How long to wait before consolidating
-    
-    # Expiration - force node replacement after time period
-    expireAfter: 720h  # 30 days - prevents long-running nodes
     
     # Budget - limit disruptions
     budgets:
       - nodes: "10%"  # Only disrupt 10% of nodes at a time
-        schedule: "* * * * *"  # Always active
       - nodes: "0"  # No disruptions during peak hours
-        schedule: "0 9-17 * * MON-FRI"  # 9 AM - 5 PM weekdays
+        schedule: "0 9 * * MON-FRI"  # Starts at 9 AM UTC on weekdays
+        duration: 8h
   
   # Weight for this NodePool (higher = preferred)
   weight: 10

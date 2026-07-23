@@ -22,7 +22,7 @@ Karpenter is a flexible, high-performance Kubernetes cluster autoscaler that pro
 ### 2. **Cost Optimization**
 - **Spot Instance Support**: Mix of On-Demand (30%) and Spot (70%) for cost savings
 - **Bin-packing**: Optimizes pod placement to minimize node count
-- **Consolidation**: Automatically replaces nodes with cheaper options
+- **Consolidation**: Automatically replaces underutilized nodes with cheaper options
 - **Instance Diversity**: Uses multiple instance types (t3, m5, c5 families)
 
 ### 3. **High Availability**
@@ -81,11 +81,14 @@ The Karpenter controller needs an IAM role with permissions to launch EC2 instan
 
 ```yaml
 spec:
-  requirements:
-    - capacity-type: on-demand, spot (70% spot for cost savings)
-    - instance-category: t, m, c (general purpose, compute optimized)
-    - instance-generation: >4 (t3, m5, c5 and newer)
-    - instance-size: large, xlarge, 2xlarge
+  template:
+    spec:
+      requirements:
+        - capacity-type: on-demand, spot
+        - instance-category: t, m, c
+        - instance-generation: ">4"
+        - instance-size: large, xlarge, 2xlarge
+      expireAfter: 720h
   
   limits:
     cpu: 100 vCPUs
@@ -93,8 +96,6 @@ spec:
   
   disruption:
     consolidationPolicy: WhenUnderutilized
-    consolidateAfter: 30s
-    expireAfter: 720h (30 days)
 ```
 
 ### EC2NodeClass Configuration
@@ -155,7 +156,7 @@ kubectl port-forward -n karpenter svc/karpenter 8080:8080
 - Cost: ~$500/month during spike
 
 ### Post-Flash Sale
-- Karpenter consolidates nodes within 30s
+- Karpenter evaluates underutilized nodes for consolidation
 - Scales down to baseline within 5 minutes
 - Automatic cost optimization
 
@@ -166,7 +167,7 @@ kubectl port-forward -n karpenter svc/karpenter 8080:8080
 | Baseline | $180/month | $150/month | 17% |
 | Flash Sale | $600/month | $400/month | 33% |
 | Scale-up Time | 1-2 minutes | <30 seconds | 4x faster |
-| Scale-down Time | 10 minutes | 30 seconds | 20x faster |
+| Scale-down | Node-group scaling | Underutilized-node consolidation | Workload-dependent |
 
 ## Disruption Management
 

@@ -155,17 +155,13 @@ networkPolicy:
         port: 8080
   egress:
     # Database and cache
-    - to:
-      - namespaceSelector: {}
-      ports:
+    - ports:
       - protocol: TCP
         port: 5432
       - protocol: TCP
         port: 6379
     # External services
-    - to:
-      - namespaceSelector: {}
-      ports:
+    - ports:
       - protocol: TCP
         port: 443
       - protocol: TCP

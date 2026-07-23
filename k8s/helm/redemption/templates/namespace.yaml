@@ -4,4 +4,3 @@ metadata:
   name: {{ .Values.namespace | default "redemption" }}
   labels:
     name: {{ .Values.namespace | default "redemption" }}
-    istio-injection: enabled
